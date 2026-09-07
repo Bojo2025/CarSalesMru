@@ -100,8 +100,17 @@ async function writeCache(payload: {
   }
 }
 
+async function importedFacebookAds(): Promise<CarListing[]> {
+  const fromMemory = (memoryCache?.listings ?? []).filter((l) =>
+    l.id.startsWith("facebook_imp_"),
+  );
+  if (fromMemory.length) return fromMemory;
+  const cached = await readCache();
+  return (cached?.listings ?? []).filter((l) => l.id.startsWith("facebook_imp_"));
+}
+
 async function runScrape(): Promise<ListingsPayload> {
-  const imported = (memoryCache?.listings ?? []).filter((l) => l.id.startsWith("facebook_imp_"));
+  const imported = await importedFacebookAds();
   const { scrapeAll } = await import("@/lib/scrape.server");
   const result = await scrapeAll();
   const seedUrls = new Set(
@@ -206,7 +215,13 @@ export const getListing = createServerFn({ method: "GET" })
   });
 
 export const importFacebookListings = createServerFn({ method: "POST" })
-  .validator(z.object({ paste: z.string().max(20_000).optional() }))
+  .validator(
+    z.object({
+      paste: z.string().max(100_000).optional(),
+      /** When true, only keep seed + newly pasted ads (ignore prior imports). */
+      replaceImports: z.boolean().optional(),
+    }),
+  )
   .handler(async ({ data }) => {
     const { listingsFromPaste, scrapeFacebook } = await import("@/lib/facebook.server");
     let cached = (await readCache()) ?? empty();
@@ -219,13 +234,16 @@ export const importFacebookListings = createServerFn({ method: "POST" })
     }
     const pasted = data.paste?.trim() ? listingsFromPaste(data.paste) : [];
     const seeded = scrapeFacebook();
+    const priorImported = data.replaceImports
+      ? []
+      : cached.listings.filter((l) => l.id.startsWith("facebook_imp_"));
+    const existingUrls = new Set(
+      [...seeded, ...priorImported].map((l) => l.sourceUrl),
+    );
+    const newlyImported = pasted.filter((row) => !existingUrls.has(row.sourceUrl));
     const others = cached.listings.filter((l) => l.source !== "facebook");
     const byUrl = new Map<string, CarListing>();
-    for (const row of [
-      ...seeded,
-      ...cached.listings.filter((l) => l.id.startsWith("facebook_imp_")),
-      ...pasted,
-    ]) {
+    for (const row of [...seeded, ...priorImported, ...pasted]) {
       byUrl.set(row.sourceUrl, row);
     }
     const facebook = [...byUrl.values()];
@@ -234,19 +252,21 @@ export const importFacebookListings = createServerFn({ method: "POST" })
     delete errors.facebook;
     if (data.paste?.trim() && pasted.length === 0) {
       errors.facebook =
-        "No Marketplace car ads found in that paste. Include a facebook.com/marketplace/item link plus the brand, price and phone from the ad.";
+        "No Marketplace car ads found. Paste one or more facebook.com/marketplace/item/… links plus each ad’s text (brand, price, phone, town).";
     }
     const payload = {
       listings: [...others, ...facebook],
       okSources,
       errors,
-      scrapedAt: cached.scrapedAt ?? new Date().toISOString(),
+      scrapedAt: new Date().toISOString(),
     };
     await writeCache(payload);
     return {
       ...payload,
       fromCache: false,
       imported: pasted.length,
+      newlyImported: newlyImported.length,
       facebookCount: facebook.length,
+      importedCount: facebook.filter((l) => l.id.startsWith("facebook_imp_")).length,
     };
   });

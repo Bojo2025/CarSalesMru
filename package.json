@@ -14,7 +14,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "preview": "vite preview --host --port 4173",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/listings.test.ts src/lib/scrape.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/listings.test.ts src/lib/scrape.test.ts src/lib/facebook.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
