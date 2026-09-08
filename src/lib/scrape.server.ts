@@ -10,8 +10,9 @@ import {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
-const FETCH_MS = 8_000;
-const DETAIL_CONCURRENCY = 8;
+const FETCH_MS = 12_000;
+const DETAIL_CONCURRENCY = 6;
+const SOURCE_TIMEOUT_MS = 28_000;
 
 const MONTHS: Record<string, number> = {
   jan: 0,
@@ -63,7 +64,7 @@ export async function scrapeAll(): Promise<ScrapeResult> {
     { source: "parbo", run: scrapeParbo },
     {
       source: "facebook",
-      run: async () => (await import("./facebook.server")).scrapeFacebook(),
+      run: async () => (await import("./facebook.server")).scrapeFacebookLive(),
     },
   ];
 
@@ -72,7 +73,7 @@ export async function scrapeAll(): Promise<ScrapeResult> {
       const rows = await Promise.race([
         job.run(),
         new Promise<CarListing[]>((_, reject) =>
-          setTimeout(() => reject(new Error("Timed out")), 18_000),
+          setTimeout(() => reject(new Error("Timed out")), SOURCE_TIMEOUT_MS),
         ),
       ]);
       return { source: job.source, rows };
@@ -334,7 +335,12 @@ function decodeSrc(src: string | undefined | null): string | null {
 /* ---------------- MyCar.mu ---------------- */
 
 async function scrapeMycar(): Promise<CarListing[]> {
-  const pages = ["https://www.mycar.mu/car/buy", "https://www.mycar.mu/car/buy?page=2"];
+  const pages = [
+    "https://www.mycar.mu/car/buy",
+    "https://www.mycar.mu/car/buy?page=2",
+    "https://www.mycar.mu/car/buy?page=3",
+    "https://www.mycar.mu/car/buy?page=4",
+  ];
   const htmls = await Promise.all(pages.map((u) => fetchHtml(u).catch(() => "")));
   const cards: CarListing[] = [];
   const seen = new Set<string>();
@@ -381,7 +387,7 @@ async function scrapeMycar(): Promise<CarListing[]> {
     });
   }
 
-  const toEnrich = cards.slice(0, 8);
+  const toEnrich = cards.slice(0, 16);
   const extras = await mapPool(toEnrich, DETAIL_CONCURRENCY, async (row) => {
     try {
       const html = await fetchHtml(row.sourceUrl);
@@ -423,45 +429,55 @@ async function scrapeMycar(): Promise<CarListing[]> {
 /* ---------------- Mega.mu Motors ---------------- */
 
 async function scrapeMega(): Promise<CarListing[]> {
-  const html = await fetchHtml("https://motors.mega.mu/auto/");
-  const $ = cheerio.load(html);
+  const pages = [
+    "https://motors.mega.mu/auto/",
+    "https://motors.mega.mu/auto/?page=2",
+    "https://motors.mega.mu/auto/?page=3",
+  ];
+  const htmls = await Promise.all(pages.map((u) => fetchHtml(u).catch(() => "")));
   const cards: CarListing[] = [];
+  const seen = new Set<string>();
 
-  $("a.ad-icon.auto, a.ad-icon").each((_, el) => {
-    const $el = $(el);
-    const href = $el.attr("href");
-    const url = absUrl("https://motors.mega.mu/", href);
-    if (!url || !/\/auto\/.+\.html/.test(url)) return;
-    const idMatch = url.match(/-([A-Za-z0-9]+)\.html$/);
-    if (!idMatch) return;
-    const name = text($el.find(".name")) || $el.attr("title") || "";
-    const { brand, model } = extractBrand(name.replace(/^\d{4}'\s*/, ""));
-    const { priceMur, negotiable } = parsePrice(text($el.find(".price")));
-    const img = decodeSrc($el.find("img").attr("data-src") || $el.find("img").attr("src"));
-    cards.push(
-      listing({
-        id: `mega_${idMatch[1]}`,
-        source: "mega",
-        sourceUrl: url,
-        title: name.replace(/^(\d{4})'\s*/, "$1 "),
-        brand,
-        model,
-        year: parseYear(name),
-        color: extractColor(name),
-        phone: null,
-        priceMur,
-        negotiable: negotiable || /neg/i.test(text($el.find(".price"))),
-        mileageKm: null,
-        transmission: null,
-        fuel: null,
-        location: null,
-        imageUrl: img,
-        postedAt: null,
-      }),
-    );
-  });
+  for (const html of htmls) {
+    if (!html) continue;
+    const $ = cheerio.load(html);
+    $("a.ad-icon.auto, a.ad-icon").each((_, el) => {
+      const $el = $(el);
+      const href = $el.attr("href");
+      const url = absUrl("https://motors.mega.mu/", href);
+      if (!url || !/\/auto\/.+\.html/.test(url)) return;
+      const idMatch = url.match(/-([A-Za-z0-9]+)\.html$/);
+      if (!idMatch || seen.has(idMatch[1])) return;
+      seen.add(idMatch[1]);
+      const name = text($el.find(".name")) || $el.attr("title") || "";
+      const { brand, model } = extractBrand(name.replace(/^\d{4}'\s*/, ""));
+      const { priceMur, negotiable } = parsePrice(text($el.find(".price")));
+      const img = decodeSrc($el.find("img").attr("data-src") || $el.find("img").attr("src"));
+      cards.push(
+        listing({
+          id: `mega_${idMatch[1]}`,
+          source: "mega",
+          sourceUrl: url,
+          title: name.replace(/^(\d{4})'\s*/, "$1 "),
+          brand,
+          model,
+          year: parseYear(name),
+          color: extractColor(name),
+          phone: null,
+          priceMur,
+          negotiable: negotiable || /neg/i.test(text($el.find(".price"))),
+          mileageKm: null,
+          transmission: null,
+          fuel: null,
+          location: null,
+          imageUrl: img,
+          postedAt: null,
+        }),
+      );
+    });
+  }
 
-  const toEnrich = cards.slice(0, 8);
+  const toEnrich = cards.slice(0, 16);
   const extras = await mapPool(toEnrich, DETAIL_CONCURRENCY, async (row) => {
     try {
       const html = await fetchHtml(row.sourceUrl);

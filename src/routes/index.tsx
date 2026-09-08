@@ -32,15 +32,21 @@ function Home() {
   const [filters, setFilters] = useState<ListingFilters>(EMPTY_FILTERS);
 
   useEffect(() => {
-    if (initial.listings.length > 0) return;
     let cancelled = false;
+    const scrapedAt = initial.scrapedAt ? new Date(initial.scrapedAt).getTime() : 0;
+    const stale =
+      initial.listings.length === 0 ||
+      !scrapedAt ||
+      Number.isNaN(scrapedAt) ||
+      Date.now() - scrapedAt > 10 * 60 * 1000;
+    if (!stale) return;
     void (async () => {
       setBusy(true);
       try {
         const next = await getListings({ data: { refresh: true } });
         if (!cancelled) setPayload(next);
       } catch {
-        /* keep empty */
+        /* keep current */
       } finally {
         if (!cancelled) setBusy(false);
       }
@@ -48,7 +54,7 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [initial.listings.length]);
+  }, [initial.listings.length, initial.scrapedAt]);
 
   const filtered = useMemo(
     () => applyFilters(payload.listings, filters),
@@ -102,13 +108,30 @@ function Home() {
           <p>
             <span className="text-fg font-medium tabular-nums">{filtered.length}</span> cars
             {hasActiveFilter ? ` of ${payload.listings.length}` : null}
+            {payload.okSources.length ? (
+              <span className="text-subtle">
+                {" "}
+                · {payload.okSources.map((id) => SOURCE_META[id].label).join(", ")}
+              </span>
+            ) : null}
           </p>
           {payload.scrapedAt ? (
             <p className="text-xs">
               Updated {new Date(payload.scrapedAt).toLocaleString("en-MU")}
+              {payload.fromCache ? " · cached" : " · live scrape"}
             </p>
           ) : null}
         </div>
+
+        {Object.keys(payload.errors).length > 0 ? (
+          <p className="text-subtle text-xs">
+            Some sources failed:{" "}
+            {Object.entries(payload.errors)
+              .map(([k, v]) => `${k} (${v})`)
+              .join(" · ")}
+            . Tap Refresh to try again.
+          </p>
+        ) : null}
 
         {busy && payload.listings.length === 0 ? (
           <div className="flex flex-col gap-4">

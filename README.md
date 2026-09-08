@@ -13,16 +13,15 @@ LotMoris is a TanStack Start app that gathers public classifieds from the island
 - Image proxy so listing photos load from this origin
 - Local cache in embedded Postgres (PGLite); optional Neon/Postgres in production
 
-## Daily Facebook import
+## Facebook Marketplace
 
-Facebook does not allow other sites to read Marketplace through an API. Once a day:
+Facebook blocks direct Marketplace scrapes. LotMoris still includes Facebook ads by:
 
-1. Open LotMoris → **Import FB**
-2. Click **Open Mauritius cars** and sign in on Facebook if needed
-3. Copy listing links (`facebook.com/marketplace/item/…`) plus each ad’s text
-4. Paste into the box and click **Import today’s ads**
+1. Scraping **publicly indexed** Mauritius Marketplace listings when you hit **Refresh** or **Scrape Facebook now**
+2. Keeping a starter indexed list in the app
+3. Optional paste-import for ads that scrape missed
 
-Imported ads stay on the lot when you refresh the other classified sites.
+Use the main **Refresh** button to update MyCar, Mega, CarMoris, Autocloud, Parbo and Facebook together.
 
 ## Requirements
 

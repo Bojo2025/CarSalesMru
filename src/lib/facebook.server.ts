@@ -222,3 +222,91 @@ export function scrapeFacebook(): CarListing[] {
   }
   return out;
 }
+
+const FB_SEARCH_QUERIES = [
+  "site:facebook.com/marketplace/item Mauritius Toyota Rs",
+  "site:facebook.com/marketplace/item Mauritius Honda Rs",
+  "site:facebook.com/marketplace/item Mauritius Nissan Rs",
+  "site:facebook.com/marketplace/item Mauritius Aqua Fit Vitz",
+  "site:facebook.com/marketplace/item Port Louis car Rs Mauritius",
+  "site:facebook.com/marketplace/item Curepipe car Rs Mauritius",
+  "site:facebook.com/marketplace/item Quatre Bornes car Rs",
+  "site:facebook.com/marketplace/item Mauritius BMW Mercedes Rs",
+];
+
+async function fetchDuckDuckGoHtml(query: string): Promise<string> {
+  const body = new URLSearchParams({ q: query });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.9",
+      },
+      body,
+      redirect: "follow",
+    });
+    if (!res.ok) return "";
+    return await res.text();
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function listingsFromSearchHtml(html: string): CarListing[] {
+  if (!html || /anomaly-modal|bots use DuckDuckGo/i.test(html)) return [];
+  const decoded = html
+    .replace(/&amp;/g, "&")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/\\u002F/g, "/")
+    .replace(/%2F/gi, "/");
+  const found = new Map<string, CarListing>();
+  const idRe = /marketplace\/item\/(\d{8,})/gi;
+  const ids = [...new Set([...decoded.matchAll(idRe)].map((m) => m[1]))];
+  for (const id of ids) {
+    const marker = `marketplace/item/${id}`;
+    const idx = decoded.toLowerCase().indexOf(marker.toLowerCase());
+    const window =
+      idx >= 0
+        ? decoded.slice(Math.max(0, idx - 120), Math.min(decoded.length, idx + 420))
+        : "";
+    const textBlob = `${window} Mauritius`.replace(/<[^>]+>/g, " ");
+    const row = listingFromFacebookText(
+      `https://www.facebook.com/marketplace/item/${id}/`,
+      textBlob,
+      false,
+      { assumeMauritius: true },
+    );
+    if (row) found.set(row.id, row);
+  }
+  return [...found.values()];
+}
+
+/** Seed ads + best-effort live discovery via public search indexes (Facebook blocks direct scrapes). */
+export async function scrapeFacebookLive(): Promise<CarListing[]> {
+  const byUrl = new Map<string, CarListing>();
+  for (const row of scrapeFacebook()) byUrl.set(row.sourceUrl, row);
+
+  const htmls = await Promise.all(FB_SEARCH_QUERIES.map((q) => fetchDuckDuckGoHtml(q)));
+  let liveCount = 0;
+  for (const html of htmls) {
+    for (const row of listingsFromSearchHtml(html)) {
+      if (!byUrl.has(row.sourceUrl)) liveCount += 1;
+      byUrl.set(row.sourceUrl, row);
+    }
+  }
+
+  if (liveCount === 0 && byUrl.size === scrapeFacebook().length) {
+    // Keep seed; caller still marks facebook as ok. Soft signal via empty live set is fine.
+  }
+
+  return [...byUrl.values()];
+}

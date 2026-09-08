@@ -10,12 +10,21 @@ export type ListingsPayload = {
   fromCache: boolean;
 };
 
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
 let memoryCache: ListingsPayload | null = null;
 
 function shouldUseDb(): boolean {
   if (typeof process === "undefined") return false;
   if (process.env.DATABASE_URL) return true;
   return process.env.NODE_ENV !== "production";
+}
+
+function isFresh(payload: ListingsPayload | null): boolean {
+  if (!payload?.scrapedAt || !payload.listings.length) return false;
+  const t = new Date(payload.scrapedAt).getTime();
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t < CACHE_TTL_MS;
 }
 
 async function sqlClient() {
@@ -142,7 +151,8 @@ export const getListings = createServerFn({ method: "GET" })
   .validator(z.object({ refresh: z.boolean().optional() }).optional())
   .handler(async ({ data }) => {
     const cached = await readCache();
-    if (!data?.refresh && cached?.listings.length) {
+    const wantFresh = Boolean(data?.refresh) || !isFresh(cached);
+    if (!wantFresh && cached?.listings.length) {
       if (!cached.listings.some((l) => l.source === "facebook")) {
         const { scrapeFacebook } = await import("@/lib/facebook.server");
         const facebook = scrapeFacebook();
@@ -220,10 +230,14 @@ export const importFacebookListings = createServerFn({ method: "POST" })
       paste: z.string().max(100_000).optional(),
       /** When true, only keep seed + newly pasted ads (ignore prior imports). */
       replaceImports: z.boolean().optional(),
+      /** Re-run live Facebook discovery (search indexes) without pasting. */
+      live: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }) => {
-    const { listingsFromPaste, scrapeFacebook } = await import("@/lib/facebook.server");
+    const { listingsFromPaste, scrapeFacebook, scrapeFacebookLive } = await import(
+      "@/lib/facebook.server"
+    );
     let cached = (await readCache()) ?? empty();
     if (!cached.listings.some((l) => l.source !== "facebook")) {
       try {
@@ -233,17 +247,19 @@ export const importFacebookListings = createServerFn({ method: "POST" })
       }
     }
     const pasted = data.paste?.trim() ? listingsFromPaste(data.paste) : [];
-    const seeded = scrapeFacebook();
+    const liveOrSeed = data.live || !data.paste?.trim()
+      ? await scrapeFacebookLive()
+      : scrapeFacebook();
     const priorImported = data.replaceImports
       ? []
       : cached.listings.filter((l) => l.id.startsWith("facebook_imp_"));
     const existingUrls = new Set(
-      [...seeded, ...priorImported].map((l) => l.sourceUrl),
+      [...liveOrSeed, ...priorImported].map((l) => l.sourceUrl),
     );
     const newlyImported = pasted.filter((row) => !existingUrls.has(row.sourceUrl));
     const others = cached.listings.filter((l) => l.source !== "facebook");
     const byUrl = new Map<string, CarListing>();
-    for (const row of [...seeded, ...priorImported, ...pasted]) {
+    for (const row of [...liveOrSeed, ...priorImported, ...pasted]) {
       byUrl.set(row.sourceUrl, row);
     }
     const facebook = [...byUrl.values()];
@@ -268,5 +284,6 @@ export const importFacebookListings = createServerFn({ method: "POST" })
       newlyImported: newlyImported.length,
       facebookCount: facebook.length,
       importedCount: facebook.filter((l) => l.id.startsWith("facebook_imp_")).length,
+      liveCount: liveOrSeed.length,
     };
   });
