@@ -127,19 +127,26 @@ async function runScrape(): Promise<ListingsPayload> {
   );
   const imported = await importedFacebookAds();
   const { scrapeAll } = await import("@/lib/scrape.server");
+  const { enrichFacebookImages, facebookSeedImageMap } = await import("@/lib/facebook.server");
   const result = await scrapeAll();
   const seedUrls = new Set(
     result.listings.filter((l) => l.source === "facebook").map((l) => l.sourceUrl),
   );
   const extra = imported.filter((l) => !seedUrls.has(l.sourceUrl));
+  const seedImgs = facebookSeedImageMap();
   const withPhotos = [...result.listings, ...extra].map((row) => {
-    if (row.source !== "facebook" || row.imageUrl) return row;
+    if (row.source !== "facebook") return row;
+    if (row.imageUrl) return row;
     const kept = priorFbImages.get(row.sourceUrl);
-    return kept ? { ...row, imageUrl: kept } : row;
+    if (kept) return { ...row, imageUrl: kept };
+    const id = row.sourceUrl.match(/marketplace\/item\/(\d+)/i)?.[1];
+    const seeded = id ? seedImgs.get(id) : undefined;
+    return seeded ? { ...row, imageUrl: seeded } : row;
   });
+  const enriched = await enrichFacebookImages(withPhotos, { limit: 8, concurrency: 3 });
   const merged = {
     ...result,
-    listings: withPhotos,
+    listings: enriched,
   };
   if (extra.length && !merged.okSources.includes("facebook")) {
     merged.okSources = [...merged.okSources, "facebook"];
@@ -173,6 +180,28 @@ export const getListings = createServerFn({ method: "GET" })
           scrapedAt: cached.scrapedAt ?? new Date().toISOString(),
         };
         await writeCache(merged);
+        return { ...merged, fromCache: true };
+      }
+      // Patch seed photos onto stale cached FB rows that still have null imageUrl
+      const { facebookSeedImageMap } = await import("@/lib/facebook.server");
+      const seedImgs = facebookSeedImageMap();
+      let patched = false;
+      const listings = cached.listings.map((row) => {
+        if (row.source !== "facebook" || row.imageUrl) return row;
+        const id = row.sourceUrl.match(/marketplace\/item\/(\d+)/i)?.[1];
+        const imageUrl = id ? seedImgs.get(id) : undefined;
+        if (!imageUrl) return row;
+        patched = true;
+        return { ...row, imageUrl };
+      });
+      if (patched) {
+        const merged = { ...cached, listings };
+        await writeCache({
+          listings,
+          okSources: cached.okSources,
+          errors: cached.errors,
+          scrapedAt: cached.scrapedAt ?? new Date().toISOString(),
+        });
         return { ...merged, fromCache: true };
       }
       return cached;

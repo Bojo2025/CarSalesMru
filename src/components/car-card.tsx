@@ -7,13 +7,13 @@ import {
   formatPhone,
   formatPrice,
   listedLabel,
-  proxiedImage,
+  listingImageSrc,
   telHref,
   type CarListing,
 } from "@/lib/listings";
 
 export function CarCard({ car }: { car: CarListing }) {
-  const img = proxiedImage(car.imageUrl);
+  const img = listingImageSrc(car);
   const [broken, setBroken] = useState(false);
   const phone = formatPhone(car.phone);
   const call = telHref(car.phone);

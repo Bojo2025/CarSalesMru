@@ -130,7 +130,7 @@ export function listingFromFacebookText(
   url: string,
   text: string,
   imported = false,
-  opts?: { assumeMauritius?: boolean },
+  opts?: { assumeMauritius?: boolean; imageUrl?: string | null },
 ): CarListing | null {
   const id = itemIdFromUrl(url);
   if (!id) return null;
@@ -157,7 +157,7 @@ export function listingFromFacebookText(
     transmission: extractGear(text),
     fuel: extractFuel(text),
     location: location ?? "Mauritius",
-    imageUrl: null,
+    imageUrl: opts?.imageUrl ?? null,
     postedAt: parsePostedAt(text) ?? new Date().toISOString(),
     scrapedAt: new Date().toISOString(),
   };
@@ -215,12 +215,25 @@ export function scrapeFacebook(): CarListing[] {
   const out: CarListing[] = [];
   const seen = new Set<string>();
   for (const ad of FACEBOOK_INDEXED_ADS) {
-    const row = listingFromFacebookText(ad.url, ad.text, false);
+    const row = listingFromFacebookText(ad.url, ad.text, false, {
+      imageUrl: ad.imageUrl ?? null,
+    });
     if (!row || seen.has(row.id) || !keepFacebook(row)) continue;
     seen.add(row.id);
     out.push(row);
   }
   return out;
+}
+
+/** Seed image map for patching stale cached Facebook rows. */
+export function facebookSeedImageMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const ad of FACEBOOK_INDEXED_ADS) {
+    if (!ad.imageUrl) continue;
+    const id = itemIdFromUrl(ad.url);
+    if (id) map.set(id, ad.imageUrl);
+  }
+  return map;
 }
 
 const FB_SEARCH_QUERIES = [
@@ -339,56 +352,66 @@ function extractOgImage(html: string): string | null {
 
 async function fetchMarketplacePreviewImage(itemUrl: string): Promise<string | null> {
   const target = normalizeMarketplaceItemUrl(itemUrl);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
-  try {
-    // Facebook serves OG preview tags to the externalhit crawler UA
-    const res = await fetch(target, {
-      signal: ctrl.signal,
-      headers: {
-        "User-Agent":
-          "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      redirect: "follow",
-    });
-    if (res.ok) {
-      const html = await res.text();
-      const og = extractOgImage(html);
-      if (og) return og;
+
+  // Microlink first: works from serverless (Vercel IPs are often blocked by Facebook HTML)
+  {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7_000);
+    try {
+      const api = `https://api.microlink.io/?url=${encodeURIComponent(target)}`;
+      const res = await fetch(api, {
+        signal: ctrl.signal,
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          status?: string;
+          data?: { image?: { url?: string } | string };
+        };
+        if (!json.status || json.status === "success") {
+          const raw = json.data?.image;
+          const url = typeof raw === "string" ? raw : raw?.url;
+          if (url) {
+            const cleaned = url.replace(/&amp;/g, "&").trim();
+            if (isUsableFacebookPhoto(cleaned)) return cleaned;
+          }
+        }
+      }
+    } catch {
+      /* fall through */
+    } finally {
+      clearTimeout(timer);
     }
-  } catch {
-    /* try microlink fallback */
-  } finally {
-    clearTimeout(timer);
   }
 
-  const ctrl2 = new AbortController();
-  const timer2 = setTimeout(() => ctrl2.abort(), 8_000);
-  try {
-    const api = `https://api.microlink.io/?url=${encodeURIComponent(target)}`;
-    const res = await fetch(api, {
-      signal: ctrl2.signal,
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as {
-      status?: string;
-      data?: { image?: { url?: string } | string };
-    };
-    if (json.status && json.status !== "success") return null;
-    const raw = json.data?.image;
-    const url = typeof raw === "string" ? raw : raw?.url;
-    if (!url || typeof url !== "string") return null;
-    const cleaned = url.replace(/&amp;/g, "&").trim();
-    if (!isUsableFacebookPhoto(cleaned)) return null;
-    return cleaned;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer2);
+  // Facebook OG preview (works when the host IP is not blocked)
+  {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(target, {
+        signal: ctrl.signal,
+        headers: {
+          "User-Agent":
+            "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+          Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const og = extractOgImage(html);
+        if (og) return og;
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  return null;
 }
 
 async function mapPool<T, R>(
@@ -439,9 +462,17 @@ export async function scrapeFacebookLive(): Promise<CarListing[]> {
   const htmls = await Promise.all(FB_SEARCH_QUERIES.map((q) => fetchDuckDuckGoHtml(q)));
   for (const html of htmls) {
     for (const row of listingsFromSearchHtml(html)) {
-      byUrl.set(row.sourceUrl, row);
+      const prev = byUrl.get(row.sourceUrl);
+      if (prev?.imageUrl && !row.imageUrl) {
+        byUrl.set(row.sourceUrl, { ...row, imageUrl: prev.imageUrl });
+      } else {
+        byUrl.set(row.sourceUrl, row);
+      }
     }
   }
 
-  return enrichFacebookImages([...byUrl.values()], { limit: 28, concurrency: 4 });
+  // Photos are enriched after scrapeAll (source timeout is too short for OG fetches).
+  return [...byUrl.values()];
 }
+
+export { fetchMarketplacePreviewImage };

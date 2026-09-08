@@ -227,3 +227,11 @@ export function proxiedImage(url: string | null | undefined): string | null {
   if (!url) return null;
   return `/api/img?u=${encodeURIComponent(url)}`;
 }
+
+/** Prefer stored photo; for Facebook, fall back to on-demand Marketplace preview resolve. */
+export function listingImageSrc(car: Pick<CarListing, "imageUrl" | "source" | "sourceUrl">): string | null {
+  if (car.imageUrl) return proxiedImage(car.imageUrl);
+  if (car.source !== "facebook") return null;
+  const id = car.sourceUrl.match(/marketplace\/item\/(\d+)/i)?.[1];
+  return id ? `/api/img?fb=${encodeURIComponent(id)}` : null;
+}

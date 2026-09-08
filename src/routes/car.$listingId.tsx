@@ -9,7 +9,7 @@ import {
   formatPhone,
   formatPrice,
   listedLabel,
-  proxiedImage,
+  listingImageSrc,
   telHref,
   waHref,
 } from "@/lib/listings";
@@ -40,7 +40,7 @@ function CarPage() {
     );
   }
 
-  const img = proxiedImage(car.imageUrl);
+  const img = listingImageSrc(car);
   const phone = formatPhone(car.phone);
   const call = telHref(car.phone);
   const wa = waHref(car.phone);
