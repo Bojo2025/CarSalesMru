@@ -119,6 +119,12 @@ async function importedFacebookAds(): Promise<CarListing[]> {
 }
 
 async function runScrape(): Promise<ListingsPayload> {
+  const prior = await readCache();
+  const priorFbImages = new Map(
+    (prior?.listings ?? [])
+      .filter((l) => l.source === "facebook" && l.imageUrl)
+      .map((l) => [l.sourceUrl, l.imageUrl as string]),
+  );
   const imported = await importedFacebookAds();
   const { scrapeAll } = await import("@/lib/scrape.server");
   const result = await scrapeAll();
@@ -126,12 +132,15 @@ async function runScrape(): Promise<ListingsPayload> {
     result.listings.filter((l) => l.source === "facebook").map((l) => l.sourceUrl),
   );
   const extra = imported.filter((l) => !seedUrls.has(l.sourceUrl));
-  const merged = extra.length
-    ? {
-        ...result,
-        listings: [...result.listings, ...extra],
-      }
-    : result;
+  const withPhotos = [...result.listings, ...extra].map((row) => {
+    if (row.source !== "facebook" || row.imageUrl) return row;
+    const kept = priorFbImages.get(row.sourceUrl);
+    return kept ? { ...row, imageUrl: kept } : row;
+  });
+  const merged = {
+    ...result,
+    listings: withPhotos,
+  };
   if (extra.length && !merged.okSources.includes("facebook")) {
     merged.okSources = [...merged.okSources, "facebook"];
   }
@@ -235,9 +244,12 @@ export const importFacebookListings = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const { listingsFromPaste, scrapeFacebook, scrapeFacebookLive } = await import(
-      "@/lib/facebook.server"
-    );
+    const {
+      listingsFromPaste,
+      scrapeFacebook,
+      scrapeFacebookLive,
+      enrichFacebookImages,
+    } = await import("@/lib/facebook.server");
     let cached = (await readCache()) ?? empty();
     if (!cached.listings.some((l) => l.source !== "facebook")) {
       try {
@@ -253,6 +265,11 @@ export const importFacebookListings = createServerFn({ method: "POST" })
     const priorImported = data.replaceImports
       ? []
       : cached.listings.filter((l) => l.id.startsWith("facebook_imp_"));
+    const priorPhotos = new Map(
+      cached.listings
+        .filter((l) => l.source === "facebook" && l.imageUrl)
+        .map((l) => [l.sourceUrl, l.imageUrl as string]),
+    );
     const existingUrls = new Set(
       [...liveOrSeed, ...priorImported].map((l) => l.sourceUrl),
     );
@@ -260,9 +277,20 @@ export const importFacebookListings = createServerFn({ method: "POST" })
     const others = cached.listings.filter((l) => l.source !== "facebook");
     const byUrl = new Map<string, CarListing>();
     for (const row of [...liveOrSeed, ...priorImported, ...pasted]) {
-      byUrl.set(row.sourceUrl, row);
+      const kept = priorPhotos.get(row.sourceUrl);
+      const withPhoto = !row.imageUrl && kept ? { ...row, imageUrl: kept } : row;
+      const prev = byUrl.get(withPhoto.sourceUrl);
+      if (prev?.imageUrl && !withPhoto.imageUrl) {
+        byUrl.set(withPhoto.sourceUrl, { ...withPhoto, imageUrl: prev.imageUrl });
+      } else {
+        byUrl.set(withPhoto.sourceUrl, withPhoto);
+      }
     }
-    const facebook = [...byUrl.values()];
+    // scrapeFacebookLive already enriches; still fill gaps for paste-only / leftover nulls
+    let facebook = await enrichFacebookImages([...byUrl.values()], {
+      limit: 24,
+      concurrency: 4,
+    });
     const okSources = Array.from(new Set([...cached.okSources, "facebook"])) as SourceId[];
     const errors = { ...cached.errors };
     delete errors.facebook;

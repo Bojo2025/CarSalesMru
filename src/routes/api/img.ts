@@ -20,7 +20,14 @@ const ALLOWED = new Set([
 function isAllowedImageHost(hostname: string): boolean {
   if (ALLOWED.has(hostname)) return true;
   const host = hostname.toLowerCase();
-  return host.endsWith(".fbcdn.net") || host === "fbcdn.net";
+  return (
+    host.endsWith(".fbcdn.net") ||
+    host === "fbcdn.net" ||
+    host.endsWith(".facebook.com") ||
+    host === "facebook.com" ||
+    host.endsWith(".fbsbx.com") ||
+    host === "fbsbx.com"
+  );
 }
 
 export const Route = createFileRoute("/api/img")({
@@ -43,12 +50,18 @@ export const Route = createFileRoute("/api/img")({
           return new Response("Host not allowed", { status: 403 });
         }
         try {
+          const host = target.hostname.toLowerCase();
+          const needsFbCrawler =
+            host === "lookaside.fbsbx.com" ||
+            host.endsWith(".fbsbx.com") ||
+            /lookaside\/crawler/i.test(target.pathname);
           const res = await fetch(target.toString(), {
             headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+              "User-Agent": needsFbCrawler
+                ? "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+                : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
               Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-              Referer: `${target.origin}/`,
+              Referer: "https://www.facebook.com/",
             },
           });
           if (!res.ok) return new Response("Upstream error", { status: 502 });

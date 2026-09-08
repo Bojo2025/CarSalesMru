@@ -290,23 +290,158 @@ function listingsFromSearchHtml(html: string): CarListing[] {
   return [...found.values()];
 }
 
+function isUsableFacebookPhoto(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    // Site logos / favicons, not listing photos
+    if (path.includes("rsrc.php")) return false;
+    if (/\.(ico|svg)(\?|$)/i.test(path)) return false;
+    return (
+      host.endsWith(".fbcdn.net") ||
+      host === "fbcdn.net" ||
+      host.endsWith(".fbsbx.com") ||
+      host === "fbsbx.com" ||
+      host === "lookaside.fbsbx.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMarketplaceItemUrl(itemUrl: string): string {
+  try {
+    const u = new URL(itemUrl);
+    const m = u.pathname.match(/\/marketplace\/item\/(\d+)/i);
+    if (m) return `https://www.facebook.com/marketplace/item/${m[1]}/`;
+  } catch {
+    /* fall through */
+  }
+  return itemUrl.endsWith("/") ? itemUrl : `${itemUrl}/`;
+}
+
+function extractOgImage(html: string): string | null {
+  const patterns = [
+    /property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
+    /content=["']([^"']+)["'][^>]*property=["']og:image["']/i,
+    /property=["']og:image:url["'][^>]*content=["']([^"']+)["']/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m?.[1]) {
+      const cleaned = m[1].replace(/&amp;/g, "&").trim();
+      if (isUsableFacebookPhoto(cleaned)) return cleaned;
+    }
+  }
+  return null;
+}
+
+async function fetchMarketplacePreviewImage(itemUrl: string): Promise<string | null> {
+  const target = normalizeMarketplaceItemUrl(itemUrl);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    // Facebook serves OG preview tags to the externalhit crawler UA
+    const res = await fetch(target, {
+      signal: ctrl.signal,
+      headers: {
+        "User-Agent":
+          "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const og = extractOgImage(html);
+      if (og) return og;
+    }
+  } catch {
+    /* try microlink fallback */
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const ctrl2 = new AbortController();
+  const timer2 = setTimeout(() => ctrl2.abort(), 8_000);
+  try {
+    const api = `https://api.microlink.io/?url=${encodeURIComponent(target)}`;
+    const res = await fetch(api, {
+      signal: ctrl2.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      status?: string;
+      data?: { image?: { url?: string } | string };
+    };
+    if (json.status && json.status !== "success") return null;
+    const raw = json.data?.image;
+    const url = typeof raw === "string" ? raw : raw?.url;
+    if (!url || typeof url !== "string") return null;
+    const cleaned = url.replace(/&amp;/g, "&").trim();
+    if (!isUsableFacebookPhoto(cleaned)) return null;
+    return cleaned;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer2);
+  }
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  }
+  const n = Math.min(limit, Math.max(items.length, 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return out;
+}
+
+/** Best-effort: attach Marketplace preview photos (Facebook blocks direct scrapes). */
+export async function enrichFacebookImages(
+  listings: CarListing[],
+  opts?: { limit?: number; concurrency?: number },
+): Promise<CarListing[]> {
+  const limit = opts?.limit ?? 24;
+  const concurrency = opts?.concurrency ?? 4;
+  const need = listings.filter((l) => l.source === "facebook" && !l.imageUrl).slice(0, limit);
+  if (need.length === 0) return listings;
+
+  const images = await mapPool(need, concurrency, async (row) => {
+    const imageUrl = await fetchMarketplacePreviewImage(row.sourceUrl);
+    return { id: row.id, imageUrl };
+  });
+
+  const byId = new Map(images.map((x) => [x.id, x.imageUrl]));
+  return listings.map((row) => {
+    const imageUrl = byId.get(row.id);
+    return imageUrl ? { ...row, imageUrl } : row;
+  });
+}
+
 /** Seed ads + best-effort live discovery via public search indexes (Facebook blocks direct scrapes). */
 export async function scrapeFacebookLive(): Promise<CarListing[]> {
   const byUrl = new Map<string, CarListing>();
   for (const row of scrapeFacebook()) byUrl.set(row.sourceUrl, row);
 
   const htmls = await Promise.all(FB_SEARCH_QUERIES.map((q) => fetchDuckDuckGoHtml(q)));
-  let liveCount = 0;
   for (const html of htmls) {
     for (const row of listingsFromSearchHtml(html)) {
-      if (!byUrl.has(row.sourceUrl)) liveCount += 1;
       byUrl.set(row.sourceUrl, row);
     }
   }
 
-  if (liveCount === 0 && byUrl.size === scrapeFacebook().length) {
-    // Keep seed; caller still marks facebook as ok. Soft signal via empty live set is fine.
-  }
-
-  return [...byUrl.values()];
+  return enrichFacebookImages([...byUrl.values()], { limit: 28, concurrency: 4 });
 }
