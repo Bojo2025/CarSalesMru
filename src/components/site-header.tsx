@@ -24,7 +24,7 @@ export function SiteHeader({
             </svg>
           </span>
           <span className="font-display text-xl leading-none tracking-wide uppercase">
-            LotMoris
+            LotoMorisVender
           </span>
         </Link>
         <div className="flex items-center gap-2">

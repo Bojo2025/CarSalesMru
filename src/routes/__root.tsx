@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "LotMoris";
+const APP_NAME = "LotoMorisVender";
 const APP_DESCRIPTION =
   "Every car for sale in Mauritius, in one place. Photos, brand, colour and seller phone from the island’s main listing sites. Ads from the last 90 days only.";
 

@@ -129,7 +129,7 @@ function CarPage() {
           </a>
           <p className="text-subtle flex items-start gap-2 text-xs">
             <MapPin className="mt-0.5 size-3 shrink-0" />
-            Confirm the car in person. LotMoris only lists Mauritius ads from the last 90 days.
+            Confirm the car in person. LotoMorisVender only lists Mauritius ads from the last 90 days.
           </p>
         </div>
       </main>

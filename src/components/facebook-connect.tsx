@@ -95,7 +95,7 @@ export function FacebookConnect({
               <Dialog.Description className="text-muted mt-1 text-sm">
                 {fbCount} Facebook ads on the lot
                 {importedCount ? ` · ${importedCount} pasted` : null}. Facebook blocks direct
-                scrapes — LotMoris pulls publicly indexed Marketplace ads, and you can paste more.
+                scrapes — LotoMorisVender pulls publicly indexed Marketplace ads, and you can paste more.
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>

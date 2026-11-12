@@ -1,8 +1,8 @@
-# LotMoris
+# LotoMorisVender
 
 Every car for sale in Mauritius, in one place.
 
-LotMoris is a TanStack Start app that gathers public classifieds from the island’s main listing sites so you can compare photos, brand, colour, price and the seller’s number without hopping between five websites. Only ads from the last 90 days are kept.
+LotoMorisVender is a TanStack Start app that gathers public classifieds from the island’s main listing sites so you can compare photos, brand, colour, price and the seller’s number without hopping between five websites. Only ads from the last 90 days are kept.
 
 ## Features
 
@@ -15,7 +15,7 @@ LotMoris is a TanStack Start app that gathers public classifieds from the island
 
 ## Facebook Marketplace
 
-Facebook blocks direct Marketplace scrapes. LotMoris still includes Facebook ads by:
+Facebook blocks direct Marketplace scrapes. LotoMorisVender still includes Facebook ads by:
 
 1. Scraping **publicly indexed** Mauritius Marketplace listings when you hit **Refresh** or **Scrape Facebook now**
 2. Keeping a starter indexed list in the app

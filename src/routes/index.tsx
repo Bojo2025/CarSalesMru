@@ -140,7 +140,7 @@ function Home() {
             ))}
           </ul>
           <p>
-            LotMoris gathers public listings so you can compare in one place. Always confirm
+            LotoMorisVender gathers public listings so you can compare in one place. Always confirm
             details with the seller on the original site. Mauritius only · ads under 90 days.
           </p>
         </div>

@@ -18,7 +18,7 @@ function hasGlobbedMigrations(root: string): boolean {
 
 function pgliteBootstrapPlugin(): Plugin {
   return {
-    name: "lotmoris:pglite-bootstrap",
+    name: "lotomorisvender:pglite-bootstrap",
     apply: "serve",
     async configureServer(server) {
       if (!hasGlobbedMigrations(server.config.root)) return;
@@ -30,7 +30,7 @@ function pgliteBootstrapPlugin(): Plugin {
           await mod.ensureDbReady();
         }
       } catch (err) {
-        console.error("[lotmoris] DB bootstrap failed:", err);
+        console.error("[lotomorisvender] DB bootstrap failed:", err);
         throw err;
       }
     },
