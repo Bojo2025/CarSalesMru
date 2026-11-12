@@ -71,13 +71,6 @@ function Home() {
     }
   }
 
-  const hasActiveFilter =
-    Boolean(filters.q) ||
-    filters.brand !== "all" ||
-    filters.color !== "all" ||
-    filters.source !== "all" ||
-    filters.maxPrice !== "all";
-
   return (
     <div className="flex min-h-dvh flex-col">
       <SiteHeader
@@ -103,25 +96,6 @@ function Home() {
         </section>
 
         <FiltersBar listings={payload.listings} filters={filters} onChange={setFilters} />
-
-        <div className="text-muted flex flex-wrap items-center justify-between gap-2 text-sm">
-          <p>
-            <span className="text-fg font-medium tabular-nums">{filtered.length}</span> cars
-            {hasActiveFilter ? ` of ${payload.listings.length}` : null}
-            {payload.okSources.length ? (
-              <span className="text-subtle">
-                {" "}
-                · {payload.okSources.map((id) => SOURCE_META[id].label).join(", ")}
-              </span>
-            ) : null}
-          </p>
-          {payload.scrapedAt ? (
-            <p className="text-xs">
-              Updated {new Date(payload.scrapedAt).toLocaleString("en-MU")}
-              {payload.fromCache ? " · cached" : " · live scrape"}
-            </p>
-          ) : null}
-        </div>
 
         {Object.keys(payload.errors).length > 0 ? (
           <p className="text-subtle text-xs">
