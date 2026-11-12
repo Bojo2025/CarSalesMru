@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ApiImgRouteImport } from './routes/api/img'
 import { Route as CarListingIdRouteImport } from './routes/car.$listingId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiImgRoute = ApiImgRouteImport.update({
@@ -31,30 +37,34 @@ const CarListingIdRoute = CarListingIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/img': typeof ApiImgRoute
   '/car/$listingId': typeof CarListingIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/img': typeof ApiImgRoute
   '/car/$listingId': typeof CarListingIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/img': typeof ApiImgRoute
   '/car/$listingId': typeof CarListingIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/img' | '/car/$listingId'
+  fullPaths: '/' | '/sitemap.xml' | '/api/img' | '/car/$listingId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/img' | '/car/$listingId'
-  id: '__root__' | '/' | '/api/img' | '/car/$listingId'
+  to: '/' | '/sitemap.xml' | '/api/img' | '/car/$listingId'
+  id: '__root__' | '/' | '/sitemap.xml' | '/api/img' | '/car/$listingId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiImgRoute: typeof ApiImgRoute
   CarListingIdRoute: typeof CarListingIdRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/img': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiImgRoute: ApiImgRoute,
   CarListingIdRoute: CarListingIdRoute,
 }

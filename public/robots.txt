@@ -2,3 +2,5 @@ User-agent: *
 Allow: /
 
 Disallow: /api/
+
+Sitemap: https://car-sales-mru.vercel.app/sitemap.xml
